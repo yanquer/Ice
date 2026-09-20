@@ -107,6 +107,16 @@ Ice uses a number of system APIs that are available starting in macOS 14. As suc
 
 ![Menu Bar Item Spacing](https://github.com/user-attachments/assets/b196aa7e-184a-4d4c-b040-502f4aae40a6)
 
+## 窗口编号回归测试
+
+在 macOS 上安装 Xcode 或 Command Line Tools 后，在仓库根目录运行：
+
+```sh
+bash Tests/run-window-id-tests.sh
+```
+
+测试直接编译生产代码中的安全窗口编号转换，覆盖 macOS 26 崩溃日志中的 `4294967296`、负数、整数边界、正常编号及无窗口场景。Ice 栏无法获取有效窗口 ID 时，沿用屏幕右侧的备用定位逻辑；窗口变化监听则跳过此次可见性检查。
+
 ## License
 
 Ice is available under the [GPL-3.0 license](LICENSE).

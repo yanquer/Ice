@@ -66,7 +66,12 @@ final class ControlItem {
         guard let window else {
             return nil
         }
-        return CGWindowID(window.windowNumber)
+        // macOS 26 的状态栏窗口编号可能超出 UInt32 范围，交由调用方使用备用逻辑。
+        guard let windowID = window.cgWindowID else {
+            Logger.controlItem.warning("Ignoring out-of-range control item window number: \(window.windowNumber)")
+            return nil
+        }
+        return windowID
     }
 
     /// A Boolean value that indicates whether the control item serves as
