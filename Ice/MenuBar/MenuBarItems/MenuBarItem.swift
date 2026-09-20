@@ -226,15 +226,17 @@ private extension MenuBarItemInfo {
     /// it is a valid menu bar item window. Only call this initializer if you are
     /// certain that the window is valid.
     init(uncheckedItemWindow itemWindow: WindowInfo) {
-        if let bundleIdentifier = itemWindow.owningApplication?.bundleIdentifier {
-            self.namespace = Namespace(bundleIdentifier)
+        let isReparented: Bool
+        if #available(macOS 26.0, *) {
+            isReparented = true
         } else {
-            self.namespace = .null
+            isReparented = false
         }
-        if let title = itemWindow.title {
-            self.title = title
-        } else {
-            self.title = ""
-        }
+        self.init(
+            windowID: itemWindow.windowID,
+            title: itemWindow.title,
+            ownerBundleIdentifier: itemWindow.owningApplication?.bundleIdentifier,
+            isReparented: isReparented
+        )
     }
 }

@@ -66,12 +66,17 @@ final class ControlItem {
         guard let window else {
             return nil
         }
-        // macOS 26 的状态栏窗口编号可能超出 UInt32 范围，交由调用方使用备用逻辑。
-        guard let windowID = window.cgWindowID else {
-            Logger.controlItem.warning("Ignoring out-of-range control item window number: \(window.windowNumber)")
-            return nil
+        if let windowID = window.cgWindowID {
+            return windowID
         }
-        return windowID
+        // macOS 26 的 NSWindow 编号不再是实际窗口 ID，从托管项目列表找回对应窗口。
+        if #available(macOS 26.0, *) {
+            let info = MenuBarItemInfo(namespace: .ice, title: identifier.rawValue)
+            return MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
+                .first(where: { $0.info == info })?.windowID
+        }
+        Logger.controlItem.warning("Ignoring out-of-range control item window number: \(window.windowNumber)")
+        return nil
     }
 
     /// A Boolean value that indicates whether the control item serves as

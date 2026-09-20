@@ -263,6 +263,7 @@ final class MenuBarManager: ObservableObject {
             let image,
             let color = image.averageColor(makeOpaque: true)
         else {
+            averageColorInfo = nil
             return
         }
 
@@ -276,26 +277,37 @@ final class MenuBarManager: ObservableObject {
     /// Returns a Boolean value that indicates whether the given display
     /// has a valid menu bar.
     func hasValidMenuBar(in windows: [WindowInfo], for display: CGDirectDisplayID) -> Bool {
-        guard let menuBarWindow = WindowInfo.getMenuBarWindow(from: windows, for: display) else {
+        guard WindowInfo.getMenuBarWindow(from: windows, for: display) != nil else {
             return false
         }
-        let position = menuBarWindow.frame.origin
-        do {
-            let uiElement = try systemWideElement.elementAtPosition(Float(position.x), Float(position.y))
-            return try uiElement?.role() == .menuBar
-        } catch {
-            return false
+        return menuBarElement(for: display) != nil
+    }
+
+    /// 在菜单栏内部查找辅助功能元素，避开刘海屏圆角并兼容命中子菜单项目的情况。
+    private func menuBarElement(for displayID: CGDirectDisplayID) -> UIElement? {
+        let bounds = CGDisplayBounds(displayID)
+        let offsets: [CGPoint] = [CGPoint(x: 20, y: 12), CGPoint(x: 60, y: 12), .zero]
+        for offset in offsets {
+            var element = try? systemWideElement.elementAtPosition(
+                Float(bounds.minX + offset.x), Float(bounds.minY + offset.y)
+            )
+            for _ in 0..<4 {
+                guard let current = element else {
+                    break
+                }
+                if (try? current.role()) == .menuBar {
+                    return current
+                }
+                element = try? current.attribute(.parent)
+            }
         }
+        return nil
     }
 
     /// Returns the frame of the application menu for the given display.
     func getApplicationMenuFrame(for displayID: CGDirectDisplayID) -> CGRect? {
-        let displayBounds = CGDisplayBounds(displayID)
-
         guard
-            let menuBar = try? systemWideElement.elementAtPosition(Float(displayBounds.origin.x), Float(displayBounds.origin.y)),
-            let role = try? menuBar.role(),
-            role == .menuBar,
+            let menuBar = menuBarElement(for: displayID),
             let items: [UIElement] = try? menuBar.arrayAttribute(.children)?.filter({ (try? $0.attribute(.enabled)) == true })
         else {
             return nil

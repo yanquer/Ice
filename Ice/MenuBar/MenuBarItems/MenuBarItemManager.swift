@@ -41,7 +41,7 @@ final class MenuBarItemManager: ObservableObject {
                     return false
                 }
 
-                if item.owningApplication == .current {
+                if item.info.namespace == .ice {
                     // Ice icon is the only item owned by Ice that should be included.
                     guard item.title == ControlItem.Identifier.iceIcon.rawValue else {
                         return false
@@ -329,8 +329,6 @@ extension MenuBarItemManager {
         if cachedItemWindowIDs == itemWindowIDs {
             logSkippingCache(reason: "item windows have not changed")
             return
-        } else {
-            cachedItemWindowIDs = itemWindowIDs
         }
 
         var items = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
@@ -357,6 +355,9 @@ extension MenuBarItemManager {
                 alwaysHiddenControlItem: alwaysHiddenControlItem,
                 otherItems: items
             )
+            // 只有成功识别分隔符并完成缓存后才记住窗口列表，失败时允许下次重试。
+            cachedItemWindowIDs = itemWindowIDs
+            Logger.itemManager.info("Cached \(itemCache.managedItems.count) menu bar items")
         } catch {
             Logger.itemManager.error("Error enforcing control item order: \(error)")
             Logger.itemManager.debug("Clearing menu bar item cache")

@@ -3,6 +3,9 @@
 //  Ice
 //
 
+import CoreGraphics
+import Foundation
+
 /// A simplified version of a menu bar item.
 struct MenuBarItemInfo: Hashable, CustomStringConvertible {
     /// The namespace of the item.
@@ -25,6 +28,27 @@ struct MenuBarItemInfo: Hashable, CustomStringConvertible {
     init(namespace: Namespace, title: String) {
         self.namespace = namespace
         self.title = title
+    }
+
+    /// 识别被控制中心托管的菜单栏项目，保留 Ice 分隔符身份并隔离同名图标。
+    init(windowID: CGWindowID, title: String?, ownerBundleIdentifier: String?, isReparented: Bool) {
+        let namespace = Namespace(ownerBundleIdentifier)
+        let title = title ?? ""
+        guard isReparented, namespace == .controlCenter else {
+            self.init(namespace: namespace, title: title)
+            return
+        }
+        switch title {
+        case ControlItem.Identifier.iceIcon.rawValue, ControlItem.Identifier.hidden.rawValue, ControlItem.Identifier.alwaysHidden.rawValue:
+            self.init(namespace: .ice, title: title)
+        case "BentoBox-0":
+            // macOS 26 改名后的控制中心仍然是不可移动的系统项目。
+            self = .controlCenter
+        default:
+            // 不同应用的托管窗口会共用 Item-0 等标题，不能共用图片和位置缓存键。
+            let namespace = title.hasPrefix("Item-") ? Namespace("\(namespace.rawValue).window.\(windowID)") : namespace
+            self.init(namespace: namespace, title: title)
+        }
     }
 }
 

@@ -44,6 +44,8 @@ final class LayoutBarScrollView: NSScrollView {
         self.horizontalScrollElasticity = .none
 
         self.drawsBackground = false
+        // 裁剪视图也保持透明，避免遮住 SwiftUI 提供的深浅色背景。
+        self.contentView.drawsBackground = false
 
         self.documentView = self.paddingView
 
