@@ -237,11 +237,12 @@ struct GeneralSettingsPane: View {
             }
             .fixedSize(horizontal: true, vertical: false)
 
-            Button("Apply") {
-                applyOffset()
-            }
-            .help("Apply the current spacing")
-            .disabled(isApplyingOffset || !hasSpacingSliderValueChanged)
+            SpacingActionButton(
+                title: String(localized: "Apply"),
+                isEnabled: !isApplyingOffset && hasSpacingSliderValueChanged,
+                action: applyOffset
+            )
+            .fixedSize()
 
             if isApplyingOffset {
                 ProgressView()
@@ -249,14 +250,13 @@ struct GeneralSettingsPane: View {
                     .scaleEffect(0.5)
                     .frame(width: 15, height: 15)
             } else {
-                Button {
-                    resetOffsetToDefault()
-                } label: {
-                    Image(systemName: "arrow.counterclockwise.circle.fill")
-                }
-                .buttonStyle(.borderless)
-                .help("Reset to the default spacing")
-                .disabled(isApplyingOffset || !isActualOffsetDifferentFromDefault)
+                SpacingActionButton(
+                    title: String(localized: "Reset to the default spacing"),
+                    systemImage: "arrow.counterclockwise.circle.fill",
+                    isEnabled: !isApplyingOffset && isActualOffsetDifferentFromDefault,
+                    action: resetOffsetToDefault
+                )
+                .frame(width: 24, height: 24)
             }
 
             IceSlider(
@@ -276,7 +276,7 @@ struct GeneralSettingsPane: View {
             }
         }
         .annotation(spacing: 2) {
-            if let spacingStatus {
+            if let spacingStatus, !hasSpacingSliderValueChanged {
                 Text(spacingStatus)
                     .accessibilityAddTraits(.updatesFrequently)
             }
