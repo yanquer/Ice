@@ -186,9 +186,8 @@ final class GeneralSettingsManager: ObservableObject {
 
         $itemSpacingOffset
             .receive(on: DispatchQueue.main)
-            .sink { [weak appState] offset in
+            .sink { offset in
                 Defaults.set(offset, forKey: .itemSpacingOffset)
-                appState?.spacingManager.offset = Int(offset)
             }
             .store(in: &c)
 

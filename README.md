@@ -114,11 +114,14 @@ Ice uses a number of system APIs that are available starting in macOS 14. As suc
 ```sh
 bash Tests/run-window-id-tests.sh
 bash Tests/run-menu-bar-tests.sh
+bash Tests/run-spacing-tests.sh
 ```
 
 测试直接编译生产代码中的安全窗口编号转换，覆盖 macOS 26 崩溃日志中的 `4294967296`、负数、整数边界、正常编号及无窗口场景。Ice 栏无法获取有效窗口 ID 时，沿用屏幕右侧的备用定位逻辑；窗口变化监听则跳过此次可见性检查。
 
 菜单栏兼容测试覆盖 macOS 26 控制中心托管后的 Ice 分隔符识别、同名图标缓存隔离、控制中心不可移动状态，以及透明截图的背景颜色降级。安装后还需验证 Ice 栏展开、图标点击和布局页显示；避免同时运行其他菜单栏隐藏工具。
+
+间距测试使用独立偏好域，覆盖两项系统设置同步写入、零值重置、上下限和非法输入保护，不修改全局间距。实际应用时会先校验写入，再更新已保存状态；macOS 26 刷新控制中心，较早系统尝试正常重启相关应用。无法自动刷新的情况会提示注销后生效，不强退第三方应用。
 
 ## License
 

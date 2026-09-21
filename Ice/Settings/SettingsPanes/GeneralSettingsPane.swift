@@ -13,6 +13,7 @@ struct GeneralSettingsPane: View {
     @State private var presentedError: LocalizedErrorWrapper?
     @State private var isApplyingOffset = false
     @State private var tempItemSpacingOffset: CGFloat = 0 // Temporary state for the slider
+    @State private var spacingStatus: LocalizedStringKey?
 
     private var manager: GeneralSettingsManager {
         appState.settingsManager.generalSettingsManager
@@ -228,7 +229,36 @@ struct GeneralSettingsPane: View {
 
     @ViewBuilder
     private var spacingOptions: some View {
-        IceLabeledContent {
+        // 标题只占自身宽度，将剩余空间留给滑块，同时保持所有按钮可直接交互。
+        HStack(spacing: 12) {
+            HStack {
+                Text("Menu bar item spacing")
+                BetaBadge()
+            }
+            .fixedSize(horizontal: true, vertical: false)
+
+            Button("Apply") {
+                applyOffset()
+            }
+            .help("Apply the current spacing")
+            .disabled(isApplyingOffset || !hasSpacingSliderValueChanged)
+
+            if isApplyingOffset {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(0.5)
+                    .frame(width: 15, height: 15)
+            } else {
+                Button {
+                    resetOffsetToDefault()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Reset to the default spacing")
+                .disabled(isApplyingOffset || !isActualOffsetDifferentFromDefault)
+            }
+
             IceSlider(
                 localizedOffsetString(for: tempItemSpacingOffset),
                 value: $tempItemSpacingOffset,
@@ -236,40 +266,21 @@ struct GeneralSettingsPane: View {
                 step: 2
             )
             .disabled(isApplyingOffset)
-        } label: {
-            IceLabeledContent {
-                Button("Apply") {
-                    applyOffset()
-                }
-                .help("Apply the current spacing")
-                .disabled(isApplyingOffset || !hasSpacingSliderValueChanged)
-
-                if isApplyingOffset {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .scaleEffect(0.5)
-                        .frame(width: 15, height: 15)
-                } else {
-                    Button {
-                        resetOffsetToDefault()
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise.circle.fill")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Reset to the default spacing")
-                    .disabled(isApplyingOffset || !isActualOffsetDifferentFromDefault)
-                }
-            } label: {
-                HStack {
-                    Text("Menu bar item spacing")
-                    BetaBadge()
-                }
+            .frame(minWidth: 260, maxWidth: .infinity)
+        }
+        .annotation(spacing: 2) {
+            if #available(macOS 26.0, *) {
+                Text("Applying this setting will refresh the menu bar. Some apps may need to be manually relaunched.")
+            } else {
+                Text("Applying this setting will relaunch all apps with menu bar items. Some apps may need to be manually relaunched.")
             }
         }
-        .annotation(
-            "Applying this setting will relaunch all apps with menu bar items. Some apps may need to be manually relaunched.",
-            spacing: 2
-        )
+        .annotation(spacing: 2) {
+            if let spacingStatus {
+                Text(spacingStatus)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+        }
         .annotation(spacing: 10, font: .callout.bold()) {
             IceGroupBox {
                 Label {
@@ -324,25 +335,32 @@ struct GeneralSettingsPane: View {
         }
     }
 
-    /// Apply menu bar spacing offset.
+    /// 将本次滑块值直接提交，只有系统写入成功后才更新已保存状态。
     private func applyOffset() {
+        guard !isApplyingOffset else {
+            return
+        }
+        let offset = Int(tempItemSpacingOffset)
         isApplyingOffset = true
-        manager.itemSpacingOffset = tempItemSpacingOffset
+        spacingStatus = nil
         Task {
+            defer { isApplyingOffset = false }
             do {
-                try await appState.spacingManager.applyOffset()
+                let refreshed = try await appState.spacingManager.applyOffset(offset)
+                manager.itemSpacingOffset = Double(offset)
+                spacingStatus = refreshed
+                    ? "Spacing saved. Some apps may need to be relaunched or you may need to sign out and back in."
+                    : "Spacing saved, but the menu bar could not be refreshed. Sign out and back in to apply it."
             } catch {
                 let alert = NSAlert(error: error)
                 alert.runModal()
             }
-            isApplyingOffset = false
         }
     }
 
-    /// Reset menu bar spacing offset to default.
+    /// 通过同一写入流程恢复默认间距，失败时保留原来的已保存状态。
     private func resetOffsetToDefault() {
         tempItemSpacingOffset = 0
-        manager.itemSpacingOffset = tempItemSpacingOffset
         applyOffset()
     }
 }

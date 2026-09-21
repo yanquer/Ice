@@ -241,6 +241,16 @@
         }
       }
     },
+    "Applying this setting will refresh the menu bar. Some apps may need to be manually relaunched.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用设置会刷新菜单栏。部分应用可能需要手动重启。"
+          }
+        }
+      }
+    },
     "Applying this setting will relaunch all apps with menu bar items. Some apps may need to be manually relaunched.": {
       "localizations": {
         "zh-Hans": {
@@ -1121,6 +1131,16 @@
         }
       }
     },
+    "Menu bar spacing must be between -16 and 16.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "菜单栏间距必须介于 -16 和 16 之间。"
+          }
+        }
+      }
+    },
     "Mouse pointer": {
       "localizations": {
         "zh-Hans": {
@@ -1186,7 +1206,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "注意：此设置需注销并重新登录才能正常生效。"
+            "value": "注意：部分应用可能需要注销并重新登录后才能应用此设置。"
           }
         }
       }
@@ -1591,6 +1611,26 @@
         }
       }
     },
+    "Spacing saved, but the menu bar could not be refreshed. Sign out and back in to apply it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "间距已保存，但菜单栏刷新失败。请注销并重新登录以应用设置。"
+          }
+        }
+      }
+    },
+    "Spacing saved. Some apps may need to be relaunched or you may need to sign out and back in.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "间距已保存。部分应用可能需要重启，或注销并重新登录后生效。"
+          }
+        }
+      }
+    },
     "Split": {
       "localizations": {
         "zh-Hans": {
@@ -1847,6 +1887,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法显示菜单栏项目"
+          }
+        }
+      }
+    },
+    "Unable to save menu bar spacing. Please try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法保存菜单栏间距，请重试。"
           }
         }
       }
