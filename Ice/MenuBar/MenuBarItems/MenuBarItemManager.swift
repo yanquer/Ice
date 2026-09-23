@@ -1301,7 +1301,9 @@ extension MenuBarItemManager {
     func tempShowItem(_ item: MenuBarItem, clickWhenFinished: Bool, mouseButton: CGMouseButton) {
         if
             let latest = MenuBarItem(windowID: item.windowID),
-            latest.isOnScreen
+            latest.isOnScreen,
+            // Tahoe 回藏后可能仍标记为 on-screen，必须确认窗口实际位于显示器内。
+            NSScreen.screens.contains(where: { CGDisplayBounds($0.displayID).contains(latest.frame) })
         {
             if clickWhenFinished {
                 Task {
@@ -1436,6 +1438,7 @@ extension MenuBarItemManager {
             guard let item = items.first(where: { $0.info == context.info }) else {
                 continue
             }
+            await appState?.imageCache.cacheImageBeforeRehiding(item)
             do {
                 try await move(item: item, to: context.returnDestination)
             } catch {

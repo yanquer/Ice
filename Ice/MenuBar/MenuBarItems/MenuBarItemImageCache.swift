@@ -97,8 +97,7 @@ final class MenuBarItemImageCache: ObservableObject {
         return true
     }
 
-    /// Captures the images of the current menu bar items and returns a dictionary containing
-    /// the images, keyed by the current menu bar item infos.
+    /// 批量抓取当前分区图标，对移动中或透明的裁剪结果逐项回退到单窗口截图。
     func createImages(for section: MenuBarSection.Name, screen: NSScreen) async -> [MenuBarItemInfo: CGImage] {
         guard let appState else {
             return [:]
@@ -110,7 +109,6 @@ final class MenuBarItemImageCache: ObservableObject {
         let backingScaleFactor = screen.backingScaleFactor
         let displayBounds = CGDisplayBounds(screen.displayID)
         let option: CGWindowImageOption = [.boundsIgnoreFraming, .bestResolution]
-        let defaultItemThickness = NSStatusBar.system.thickness * backingScaleFactor
 
         var itemInfos = [CGWindowID: MenuBarItemInfo]()
         var itemFrames = [CGWindowID: CGRect]()
@@ -151,7 +149,11 @@ final class MenuBarItemImageCache: ObservableObject {
                     height: itemFrame.height * backingScaleFactor
                 )
 
-                guard let itemImage = compositeImage.cropping(to: frame) else {
+                guard
+                    Bridging.getWindowFrame(for: windowID) == itemFrame,
+                    let itemImage = compositeImage.cropping(to: frame),
+                    itemImage.hasVisibleMenuBarPixels
+                else {
                     continue
                 }
 
@@ -159,34 +161,53 @@ final class MenuBarItemImageCache: ObservableObject {
             }
         } else {
             Logger.imageCache.warning("Composite image capture failed. Attempting to capturing items individually.")
+        }
 
-            for windowID in windowIDs {
-                guard
-                    let itemInfo = itemInfos[windowID],
-                    let itemFrame = itemFrames[windowID]
-                else {
-                    continue
-                }
-
-                let frame = CGRect(
-                    x: 0,
-                    y: ((itemFrame.height * backingScaleFactor) / 2) - (defaultItemThickness / 2),
-                    width: itemFrame.width * backingScaleFactor,
-                    height: defaultItemThickness
-                )
-
-                guard
-                    let itemImage = ScreenCapture.captureWindow(windowID, option: option),
-                    let croppedImage = itemImage.cropping(to: frame)
-                else {
-                    continue
-                }
-
-                images[itemInfo] = croppedImage
+        // 合成图整体成功，不代表其中每个图标都成功；只重抓缺失项目。
+        for windowID in windowIDs {
+            guard let itemInfo = itemInfos[windowID], images[itemInfo] == nil else {
+                continue
+            }
+            if let image = captureItemImage(windowID: windowID, screen: screen) {
+                images[itemInfo] = image
+            } else {
+                Logger.imageCache.debug("Empty image for \(itemInfo); retaining the last valid snapshot")
             }
         }
 
         return images
+    }
+
+    /// 单独截取菜单栏图标，保持原有裁剪方式并拒绝全透明结果。
+    private func captureItemImage(windowID: CGWindowID, screen: NSScreen) -> CGImage? {
+        guard let frame = Bridging.getWindowFrame(for: windowID) else {
+            return nil
+        }
+        let scale = screen.backingScaleFactor
+        let thickness = NSStatusBar.system.thickness * scale
+        let crop = CGRect(x: 0, y: (frame.height * scale - thickness) / 2, width: frame.width * scale, height: thickness)
+        guard
+            let image = ScreenCapture.captureWindow(windowID, option: [.boundsIgnoreFraming, .bestResolution]),
+            let cropped = image.cropping(to: crop),
+            cropped.hasVisibleMenuBarPixels
+        else {
+            return nil
+        }
+        return cropped
+    }
+
+    /// 在图标仍处于可见位置时保存快照，防止回藏后的系统空图使其永久消失。
+    func cacheImageBeforeRehiding(_ item: MenuBarItem) async {
+        let screen = await MainActor.run {
+            NSScreen.screens.first { CGDisplayBounds($0.displayID).contains(item.frame) }
+        }
+        guard let screen, let image = captureItemImage(windowID: item.windowID, screen: screen) else {
+            return
+        }
+        await MainActor.run {
+            images.mergeVisibleMenuBarImages([item.info: image])
+        }
+        Logger.imageCache.debug("Saved snapshot before rehiding \(item.logString)")
     }
 
     /// Updates the cache for the given sections, without checking whether caching is necessary.
@@ -213,11 +234,10 @@ final class MenuBarItemImageCache: ObservableObject {
         }
 
         await MainActor.run { [newImages] in
-            images.merge(newImages) { (_, new) in new }
+            self.screen = screen
+            self.menuBarHeight = screen.getMenuBarHeight()
+            images.mergeVisibleMenuBarImages(newImages)
         }
-
-        self.screen = screen
-        self.menuBarHeight = screen.getMenuBarHeight()
     }
 
     /// Updates the cache for the given sections, if necessary.

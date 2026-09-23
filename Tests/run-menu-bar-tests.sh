@@ -9,6 +9,7 @@ trap 'rm -rf "$test_directory"' EXIT
 xcrun swiftc -O -parse-as-library \
     "$repo_root/Ice/MenuBar/MenuBarItems/MenuBarItemInfo.swift" \
     "$repo_root/Ice/Utilities/CGImage+AverageColor.swift" \
+    "$repo_root/Ice/MenuBar/MenuBarItems/MenuBarImageCacheSupport.swift" \
     "$repo_root/Tests/MenuBarCompatibilityTests.swift" \
     -o "$test_directory/menu-bar-tests"
 "$test_directory/menu-bar-tests"

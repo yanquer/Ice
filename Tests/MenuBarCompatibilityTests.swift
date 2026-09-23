@@ -27,6 +27,7 @@ private enum MenuBarCompatibilityTests {
     static func main() throws {
         try testIdentity()
         try testAverageColor()
+        try testImageCache()
         print("All menu bar compatibility regression cases passed.")
     }
 
@@ -99,5 +100,45 @@ private enum MenuBarCompatibilityTests {
         }
         let faint = try makeImage(color: CGColor(gray: 1, alpha: 0.1))
         try expect(faint.averageColor() == nil, "pixels below alpha threshold use fallback")
+    }
+
+    /// 模拟图标显示、回藏后全透明、重试恢复，验证空图不会覆盖最后正常图像。
+    private static func testImageCache() throws {
+        let transparent = try makeImage(color: CGColor(gray: 0, alpha: 0))
+        let black = try makeImage(color: CGColor(gray: 0, alpha: 1))
+        let white = try makeImage(color: CGColor(gray: 1, alpha: 1))
+        let faint = try makeImage(color: CGColor(gray: 1, alpha: 0.01))
+        try expect(!transparent.hasVisibleMenuBarPixels, "fully transparent icon is rejected")
+        try expect(black.hasVisibleMenuBarPixels, "black icon is valid")
+        try expect(white.hasVisibleMenuBarPixels, "white icon is valid")
+        try expect(faint.hasVisibleMenuBarPixels, "faint icon is not mistaken for an empty capture")
+
+        var cache: [String: CGImage] = [:]
+        cache.mergeVisibleMenuBarImages(["docker": white])
+        try expect(cache["docker"] === white, "initial valid icon is cached")
+        cache.mergeVisibleMenuBarImages(["docker": transparent, "other": black])
+        try expect(cache["docker"] === white, "empty capture after rehiding retains the last icon")
+        try expect(cache["other"] === black, "one failed icon does not block other updates")
+        cache.mergeVisibleMenuBarImages(["docker": transparent])
+        try expect(cache["docker"] === white, "repeated empty captures retain the last icon")
+        cache.mergeVisibleMenuBarImages(["docker": black])
+        try expect(cache["docker"] === black, "later valid capture replaces the retained icon")
+        cache.mergeVisibleMenuBarImages(["new": transparent])
+        try expect(cache["new"] == nil, "never cache a first empty snapshot as success")
+
+        guard let context = CGContext(
+            data: nil,
+            width: 65,
+            height: 33,
+            bitsPerComponent: 8,
+            bytesPerRow: 260,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw NSError(domain: "MenuBarCompatibilityTests", code: 4)
+        }
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 64, y: 32, width: 1, height: 1))
+        try expect(context.makeImage()?.hasVisibleMenuBarPixels == true, "sparse edge pixel survives visibility detection")
     }
 }

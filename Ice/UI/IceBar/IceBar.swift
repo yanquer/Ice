@@ -399,16 +399,23 @@ private struct IceBarItemView: View {
     }
 
     var body: some View {
-        if let image {
-            Image(nsImage: image)
-                .contentShape(Rectangle())
-                .overlay {
-                    IceBarItemClickView(item: item, leftClickAction: leftClickAction, rightClickAction: rightClickAction)
-                }
-                .accessibilityLabel(item.displayName)
-                .accessibilityAction(named: "left click", leftClickAction)
-                .accessibilityAction(named: "right click", rightClickAction)
+        Group {
+            if let image {
+                Image(nsImage: image)
+            } else {
+                // 尚无有效快照时保留可点击入口，不让单个图标静默消失。
+                Image(systemName: "arrow.clockwise")
+                    .frame(width: max(item.frame.width, 20), height: imageCache.menuBarHeight ?? 24)
+                    .help("Icon temporarily unavailable. Click to show the original menu bar item.")
+            }
         }
+        .contentShape(Rectangle())
+        .overlay {
+            IceBarItemClickView(item: item, leftClickAction: leftClickAction, rightClickAction: rightClickAction)
+        }
+        .accessibilityLabel(item.displayName)
+        .accessibilityAction(named: "left click", leftClickAction)
+        .accessibilityAction(named: "right click", rightClickAction)
     }
 }
 

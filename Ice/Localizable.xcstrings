@@ -911,6 +911,16 @@
         }
       }
     },
+    "Icon temporarily unavailable. Click to show the original menu bar item.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图标暂不可用，点击可在系统菜单栏中显示原项目。"
+          }
+        }
+      }
+    },
     "Insert divider items": {
       "localizations": {
         "zh-Hans": {
