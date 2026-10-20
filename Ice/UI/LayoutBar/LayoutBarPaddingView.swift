@@ -85,16 +85,12 @@ final class LayoutBarPaddingView: NSView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        defer {
-            DispatchQueue.main.async {
-                self.container.canSetArrangedViews = true
-            }
-        }
-
         guard let draggingSource = sender.draggingSource as? LayoutBarItemView else {
             return false
         }
 
+        let sourceContainer: LayoutBarContainer? = draggingSource.oldContainerInfo?.container
+        var destination: MenuBarItemManager.MoveDestination?
         if let index = arrangedViews.firstIndex(of: draggingSource) {
             if arrangedViews.count == 1 {
                 // dragging source is the only view in the layout bar, so we
@@ -106,37 +102,49 @@ final class LayoutBarPaddingView: NSView {
                 case .alwaysHidden: items.first { $0.info == .alwaysHiddenControlItem }
                 }
                 if let targetItem {
-                    move(item: draggingSource.item, to: .leftOfItem(targetItem))
+                    destination = .leftOfItem(targetItem)
                 } else {
                     Logger.layoutBar.error("No target item for layout bar drag")
                 }
             } else if arrangedViews.indices.contains(index + 1) {
                 // we have a view to the right of the dragging source
                 let targetItem = arrangedViews[index + 1].item
-                move(item: draggingSource.item, to: .leftOfItem(targetItem))
+                destination = .leftOfItem(targetItem)
             } else if arrangedViews.indices.contains(index - 1) {
                 // we have a view to the left of the dragging source
                 let targetItem = arrangedViews[index - 1].item
-                move(item: draggingSource.item, to: .rightOfItem(targetItem))
+                destination = .rightOfItem(targetItem)
             }
         }
-
+        move(item: draggingSource.item, to: destination, sourceContainer: sourceContainer)
         return true
     }
 
-    private func move(item: MenuBarItem, to destination: MenuBarItemManager.MoveDestination) {
+    /// 移动结束后先恢复两个分区的真实状态，再报告错误，避免旧窗口和乐观布局残留。
+    private func move(item: MenuBarItem, to destination: MenuBarItemManager.MoveDestination?, sourceContainer: LayoutBarContainer?) {
         guard let appState = container.appState else {
+            sourceContainer?.resumeUpdatesAfterDragging()
+            container.resumeUpdatesAfterDragging()
             return
         }
         Task {
-            try await Task.sleep(for: .milliseconds(25))
+            var moveError: Error?
             do {
-                try await appState.itemManager.slowMove(item: item, to: destination)
-                appState.itemManager.removeTempShownItemFromCache(with: item.info)
+                try await Task.sleep(for: .milliseconds(25))
+                if let destination {
+                    try await appState.itemManager.slowMove(item: item, to: destination)
+                    appState.itemManager.removeTempShownItemFromCache(with: item.info)
+                }
             } catch {
+                moveError = error
                 Logger.layoutBar.error("Error moving menu bar item: \(error)")
-                let alert = NSAlert(error: error)
-                alert.runModal()
+            }
+            await appState.itemManager.cacheItemsIfNeeded()
+            sourceContainer?.resumeUpdatesAfterDragging()
+            container.resumeUpdatesAfterDragging()
+            Logger.layoutBar.info("Reconciled layout after drag for \(item.logString); failed: \(moveError != nil)")
+            if let moveError {
+                NSAlert(error: moveError).runModal()
             }
         }
     }

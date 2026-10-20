@@ -28,6 +28,9 @@ final class LayoutBarItemView: NSView {
     /// layout view.
     var oldContainerInfo: (container: LayoutBarContainer, index: Int)?
 
+    /// 在整个拖动会话中保留来源分区，跨区放下或取消时都必须解除它的刷新锁。
+    private weak var dragSourceContainer: LayoutBarContainer?
+
     /// A Boolean value that indicates whether the item view is currently inside a container.
     var hasContainer = false
 
@@ -44,7 +47,7 @@ final class LayoutBarItemView: NSView {
                 )
                 setFrameSize(size)
             } else {
-                setFrameSize(.zero)
+                setFrameSize(CGSize(width: max(item.frame.width, 20), height: max(item.frame.height, 24)))
             }
             needsDisplay = true
         }
@@ -106,6 +109,12 @@ final class LayoutBarItemView: NSView {
         cancellables = c
     }
 
+    /// 没有截图时沿用 Ice 栏的恢复符号，保留可见且可拖动的项目入口。
+    private var displayImage: NSImage? {
+        image ?? NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: item.displayName)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.labelColor]))
+    }
+
     /// Provides an alert to display when the item view is disabled.
     func provideAlertForDisabledItem() -> NSAlert {
         let alert = NSAlert()
@@ -123,8 +132,8 @@ final class LayoutBarItemView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         if !isDraggingPlaceholder {
-            image?.draw(
-                in: bounds,
+            displayImage?.draw(
+                in: image == nil ? CGRect(x: bounds.midX - 8, y: bounds.midY - 8, width: 16, height: 16) : bounds,
                 from: .zero,
                 operation: .sourceOver,
                 fraction: isEnabled ? 1.0 : 0.67
@@ -171,7 +180,7 @@ final class LayoutBarItemView: NSView {
         pasteboardItem.setData(Data(), forType: .layoutBarItem)
 
         let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
-        draggingItem.setDraggingFrame(bounds, contents: image)
+        draggingItem.setDraggingFrame(bounds, contents: displayImage)
 
         beginDraggingSession(with: [draggingItem], event: event, source: self)
     }
@@ -186,41 +195,45 @@ extension LayoutBarItemView: NSDraggingSource {
     func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
         // make sure the container doesn't update its arranged views and that items
         // aren't arranged during a dragging session
-        if let container = superview as? LayoutBarContainer {
-            container.canSetArrangedViews = false
-        }
+        beginLayoutDragging()
 
         // prevent the dragging image from animating back to its original location
         session.animatesToStartingPositionsOnCancelOrFail = false
 
         // async to prevent the view from disappearing before the dragging image appears
         DispatchQueue.main.async {
-            self.isDraggingPlaceholder = true
+            if self.dragSourceContainer != nil {
+                self.isDraggingPlaceholder = true
+            }
         }
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        defer {
-            // always remove container info at the end of a session
-            oldContainerInfo = nil
-        }
+        endLayoutDragging(operation: operation)
+    }
 
-        // since the session's `animatesToStartingPositionsOnCancelOrFail` property was
-        // set to false when the session began (above), there is no delay between the user
-        // releasing the dragging item and this method being called; thus, `isDraggingPlaceholder`
-        // only needs to be updated here; if we ever decide we want animation, it may also
-        // need to be updated inside `performDragOperation(_:)` on `LayoutBarPaddingView`
+    /// 记录真实来源并暂停列表刷新，避免依赖拖动目标的回调才能记住来源。
+    func beginLayoutDragging() {
+        guard let container = superview as? LayoutBarContainer,
+              let index: Int = container.arrangedViews.firstIndex(of: self) else { return }
+        dragSourceContainer = container
+        oldContainerInfo = (container, index)
+        container.canSetArrangedViews = false
+    }
+
+    /// 无论成功、失败或取消都解锁来源；取消时立即恢复，成功放下由移动完成回调对账。
+    func endLayoutDragging(operation: NSDragOperation) {
         isDraggingPlaceholder = false
-
-        // if the drop occurs outside of a container, reinsert the view into its original
-        // container at its original index
-        if !hasContainer {
-            guard let (container, index) = oldContainerInfo else {
-                return
-            }
-            container.shouldAnimateNextLayoutPass = false
-            container.arrangedViews.insert(self, at: index)
+        let source: LayoutBarContainer? = dragSourceContainer
+        let target: LayoutBarContainer? = superview as? LayoutBarContainer
+        source?.canSetArrangedViews = true
+        target?.canSetArrangedViews = true
+        if operation.isEmpty || !hasContainer {
+            if target !== source { target?.resumeUpdatesAfterDragging() }
+            source?.resumeUpdatesAfterDragging()
         }
+        dragSourceContainer = nil
+        oldContainerInfo = nil
     }
 }
 

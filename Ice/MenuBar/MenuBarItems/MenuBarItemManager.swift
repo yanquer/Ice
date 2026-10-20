@@ -103,9 +103,6 @@ final class MenuBarItemManager: ObservableObject {
     /// Storage for internal observers.
     private var cancellables = Set<AnyCancellable>()
 
-    /// Cached window identifiers for the most recent items.
-    private var cachedItemWindowIDs = [CGWindowID]()
-
     /// Context values for the current temporarily shown items.
     private var tempShownItemContexts = [TempShownItemContext]()
 
@@ -307,7 +304,10 @@ extension MenuBarItemManager {
             }
         }
 
-        itemCache = cache
+        if itemCache != cache {
+            itemCache = cache
+            Logger.itemManager.info("Cached \(cache.managedItems.count) menu bar items")
+        }
     }
 
     /// Caches the current menu bar items if needed, ensuring that the control
@@ -325,12 +325,7 @@ extension MenuBarItemManager {
             }
         }
 
-        let itemWindowIDs = Bridging.getWindowList(option: [.menuBarItems, .activeSpace])
-        if cachedItemWindowIDs == itemWindowIDs {
-            logSkippingCache(reason: "item windows have not changed")
-            return
-        }
-
+        // 窗口编号不变时，位置、分区和可见性仍可能变化；不能仅按编号跳过恢复。
         var items = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
 
         let hiddenControlItem = items.firstIndex(matching: .hiddenControlItem).map { items.remove(at: $0) }
@@ -355,9 +350,6 @@ extension MenuBarItemManager {
                 alwaysHiddenControlItem: alwaysHiddenControlItem,
                 otherItems: items
             )
-            // 只有成功识别分隔符并完成缓存后才记住窗口列表，失败时允许下次重试。
-            cachedItemWindowIDs = itemWindowIDs
-            Logger.itemManager.info("Cached \(itemCache.managedItems.count) menu bar items")
         } catch {
             Logger.itemManager.error("Error enforcing control item order: \(error)")
             Logger.itemManager.debug("Clearing menu bar item cache")

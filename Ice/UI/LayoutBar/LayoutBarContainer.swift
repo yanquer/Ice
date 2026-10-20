@@ -205,6 +205,13 @@ final class LayoutBarContainer: NSView {
         arrangedViews = newViews
     }
 
+    /// 结束拖动锁定后，按最新缓存重建分区，恢复锁定期间错过的更新。
+    func resumeUpdatesAfterDragging() {
+        canSetArrangedViews = true
+        shouldAnimateNextLayoutPass = false
+        setArrangedViews(items: appState?.itemManager.itemCache.managedItems(for: section.name))
+    }
+
     /// Updates the positions of the container's arranged views using the
     /// specified dragging information and phase.
     ///
@@ -220,6 +227,8 @@ final class LayoutBarContainer: NSView {
         }
         switch phase {
         case .entered:
+            // 目标分区也暂停刷新，避免周期快照把正在拖入的项目挤回原位。
+            canSetArrangedViews = false
             if !arrangedViews.contains(sourceView) {
                 shouldAnimateNextLayoutPass = false
             }
@@ -228,6 +237,9 @@ final class LayoutBarContainer: NSView {
             if let sourceIndex = arrangedViews.firstIndex(of: sourceView) {
                 shouldAnimateNextLayoutPass = false
                 arrangedViews.remove(at: sourceIndex)
+            }
+            if sourceView.oldContainerInfo?.container !== self {
+                resumeUpdatesAfterDragging()
             }
             return .move
         case .updated:
@@ -280,6 +292,7 @@ final class LayoutBarContainer: NSView {
             }
             return .move
         case .ended:
+            canSetArrangedViews = true
             return .move
         }
     }
