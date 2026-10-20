@@ -24,5 +24,6 @@ struct SettingsWindow: Scene {
         .defaultSize(width: 900, height: 625)
         .environmentObject(appState)
         .environmentObject(appState.navigationState)
+        .environmentObject(appState.itemManager)
     }
 }

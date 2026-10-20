@@ -28,6 +28,7 @@ private enum MenuBarCompatibilityTests {
         try testIdentity()
         try testAverageColor()
         try testImageCache()
+        try testLayoutReadiness()
         print("All menu bar compatibility regression cases passed.")
     }
 
@@ -39,6 +40,48 @@ private enum MenuBarCompatibilityTests {
             ])
         }
         print("PASS: \(name)")
+    }
+
+    /// 模拟分隔符从未创建、展开、移动到稳定的启动过程，防止过早发布错误分区。
+    private static func testLayoutReadiness() throws {
+        typealias Divider = MenuBarLayoutReadiness.Divider
+        let hidden: Divider = Divider(frame: CGRect(x: -4_000, y: 0, width: 5_000, height: 33), isExpanded: true)
+        let always: Divider = Divider(frame: CGRect(x: -9_100, y: 0, width: 5_000, height: 33), isExpanded: true)
+        let pending: Divider = Divider(frame: .zero, isExpanded: true)
+        let narrow: Divider = Divider(frame: CGRect(x: 100, y: 0, width: 25, height: 33), isExpanded: true)
+        try expect(!MenuBarLayoutReadiness.isValid(hidden: nil, alwaysHidden: nil, requiresAlwaysHidden: false,
+            minimumExpandedWidth: 1_512), "missing hidden divider cannot publish layout")
+        try expect(!MenuBarLayoutReadiness.isValid(hidden: pending, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512), "zero-size divider cannot publish layout")
+        try expect(!MenuBarLayoutReadiness.isValid(hidden: narrow, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512), "divider must finish expanding before classification")
+        try expect(!MenuBarLayoutReadiness.isValid(hidden: hidden, alwaysHidden: nil, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512), "enabled always-hidden section waits for its divider")
+        try expect(MenuBarLayoutReadiness.isValid(hidden: hidden, alwaysHidden: nil, requiresAlwaysHidden: false,
+            minimumExpandedWidth: 1_512), "disabled always-hidden section does not block startup")
+        try expect(!MenuBarLayoutReadiness.isValid(hidden: always, alwaysHidden: hidden, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512), "reversed divider order cannot publish")
+        try expect(MenuBarLayoutReadiness.isValid(hidden: always, alwaysHidden: hidden, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512, requiresCorrectOrder: false), "initialized reversed dividers can be repaired")
+        let collapsed: Divider = Divider(frame: CGRect(x: 100, y: 0, width: 0, height: 33), isExpanded: false)
+        try expect(MenuBarLayoutReadiness.isValid(hidden: collapsed, alwaysHidden: nil, requiresAlwaysHidden: false,
+            minimumExpandedWidth: 1_512), "intentionally invisible separator remains valid when showing items")
+        var readiness: MenuBarLayoutReadiness = MenuBarLayoutReadiness()
+        try expect(!readiness.observe(hidden: hidden, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512, now: 0), "first valid snapshot still waits for stability")
+        try expect(!readiness.observe(hidden: hidden, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512, now: 0.1), "short-lived snapshot does not flash layout")
+        let moved: Divider = Divider(frame: hidden.frame.offsetBy(dx: 50, dy: 0), isExpanded: true)
+        try expect(!readiness.observe(hidden: moved, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512, now: 0.25), "reordering invalidates old coordinates")
+        try expect(readiness.observe(hidden: moved, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512, now: 0.5), "stable fresh coordinates become ready without five-second delay")
+        try expect(!readiness.observe(hidden: nil, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512, now: 1), "window recreation resets readiness")
+        try expect(!readiness.observe(hidden: moved, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512, now: 2), "recreated divider needs a new stability window")
+        try expect(readiness.observe(hidden: moved, alwaysHidden: always, requiresAlwaysHidden: true,
+            minimumExpandedWidth: 1_512, now: 2.25), "recreated divider recovers after stable observation")
     }
 
     /// 使用真实窗口元数据样例验证 Ice 分隔符、系统项目和同名第三方图标。

@@ -1,6 +1,27 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Preparing menu bar layout…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "正在恢复菜单栏布局…" }
+        }
+      }
+    },
+    "Unable to prepare menu bar layout. Please try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "暂时无法恢复菜单栏布局，请重试。" }
+        }
+      }
+    },
+    "Retry": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "重试" }
+        }
+      }
+    },
     "\"%@\" is invalid": {
       "localizations": {
         "zh-Hans": {

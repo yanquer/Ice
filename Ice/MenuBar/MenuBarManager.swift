@@ -78,6 +78,9 @@ final class MenuBarManager: ObservableObject {
             MenuBarSection(name: .hidden, appState: appState),
             MenuBarSection(name: .alwaysHidden, appState: appState),
         ]
+        for section: MenuBarSection in sections {
+            section.controlItem.refreshAfterSectionSetup()
+        }
     }
 
     /// Configures the internal observers for the manager.

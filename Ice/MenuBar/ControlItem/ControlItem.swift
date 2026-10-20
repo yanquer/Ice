@@ -339,6 +339,11 @@ final class ControlItem {
         button.action = #selector(performAction)
     }
 
+    /// 分区注册完成后重新应用初始状态，避免构造期间找不到所属分区而跳过尺寸更新。
+    func refreshAfterSectionSetup() {
+        updateStatusItem(with: state)
+    }
+
     /// Updates the appearance of the status item using the given hiding state.
     private func updateStatusItem(with state: HidingState) {
         guard

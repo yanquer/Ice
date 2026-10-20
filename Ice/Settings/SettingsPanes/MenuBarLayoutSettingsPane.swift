@@ -7,18 +7,35 @@ import SwiftUI
 
 struct MenuBarLayoutSettingsPane: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var itemManager: MenuBarItemManager
 
     var body: some View {
         if !ScreenCapture.cachedCheckPermissions() {
             missingScreenRecordingPermission
         } else if appState.menuBarManager.isMenuBarHiddenBySystemUserDefaults {
             cannotArrange
+        } else if !itemManager.isLayoutReady {
+            initializingLayout
         } else {
             IceForm(alignment: .leading, spacing: 20) {
                 header
                 layoutBars
             }
         }
+    }
+
+    /// 初始分区尚未稳定时不展示可拖动列表，超时后允许用户重试。
+    private var initializingLayout: some View {
+        VStack(spacing: 12) {
+            if itemManager.layoutInitializationTimedOut {
+                Text("Unable to prepare menu bar layout. Please try again.")
+                Button("Retry") { itemManager.retryLayoutInitialization() }
+            } else {
+                ProgressView()
+                Text("Preparing menu bar layout…")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder

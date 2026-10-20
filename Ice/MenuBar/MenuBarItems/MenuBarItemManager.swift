@@ -97,6 +97,13 @@ final class MenuBarItemManager: ObservableObject {
     /// The manager's menu bar item cache.
     @Published private(set) var itemCache = ItemCache()
 
+    /// 首次稳定快照发布前不允许布局页展示或拖动过渡分区。
+    @Published private(set) var isLayoutReady: Bool = false
+    @Published private(set) var layoutInitializationTimedOut: Bool = false
+    private var layoutReadiness: MenuBarLayoutReadiness = MenuBarLayoutReadiness()
+    private var initializationTask: Task<Void, Never>?
+    private var isCachingItems: Bool = false
+
     /// The shared app state.
     private(set) weak var appState: AppState?
 
@@ -164,6 +171,27 @@ final class MenuBarItemManager: ObservableObject {
     /// Sets up the manager.
     func performSetup() {
         configureCancellables()
+        retryLayoutInitialization()
+    }
+
+    /// 启动阶段短间隔读取，最多尝试 20 次；超时保留普通定时恢复并提供手动重试。
+    func retryLayoutInitialization() {
+        guard initializationTask == nil, !isLayoutReady else { return }
+        layoutInitializationTimedOut = false
+        layoutReadiness = MenuBarLayoutReadiness()
+        Logger.itemManager.info("Preparing initial menu bar layout")
+        initializationTask = Task { [weak self] in
+            defer { self?.initializationTask = nil }
+            for _ in 0..<20 {
+                guard let self, !Task.isCancelled else { return }
+                await self.cacheItemsIfNeeded()
+                if self.isLayoutReady { return }
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            }
+            guard let self, !self.isLayoutReady else { return }
+            self.layoutInitializationTimedOut = true
+            Logger.itemManager.warning("Menu bar layout initialization timed out; waiting for retry")
+        }
     }
 
     /// Configures the internal observers for the manager.
@@ -172,7 +200,6 @@ final class MenuBarItemManager: ObservableObject {
 
         Timer.publish(every: 5, on: .main, in: .default)
             .autoconnect()
-            .merge(with: Just(.now))
             .sink { [weak self] _ in
                 guard let self else {
                     return
@@ -313,6 +340,9 @@ extension MenuBarItemManager {
     /// Caches the current menu bar items if needed, ensuring that the control
     /// items are in the correct order.
     func cacheItemsIfNeeded() async {
+        guard !isCachingItems else { return }
+        isCachingItems = true
+        defer { isCachingItems = false }
         do {
             try await waitForItemsToStopMoving(timeout: .seconds(1))
         } catch is TaskTimeoutError {
@@ -326,12 +356,12 @@ extension MenuBarItemManager {
         }
 
         // 窗口编号不变时，位置、分区和可见性仍可能变化；不能仅按编号跳过恢复。
-        var items = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
-
-        let hiddenControlItem = items.firstIndex(matching: .hiddenControlItem).map { items.remove(at: $0) }
-        let alwaysHiddenControlItem = items.firstIndex(matching: .alwaysHiddenControlItem).map { items.remove(at: $0) }
+        let initialItems: [MenuBarItem] = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
+        let hiddenControlItem: MenuBarItem? = initialItems.first { $0.info == .hiddenControlItem }
+        let alwaysHiddenControlItem: MenuBarItem? = initialItems.first { $0.info == .alwaysHiddenControlItem }
 
         guard let hiddenControlItem else {
+            layoutReadiness = MenuBarLayoutReadiness()
             Logger.itemManager.warning("Missing control item for hidden section")
             Logger.itemManager.debug("Clearing menu bar item cache")
             itemCache.clear()
@@ -339,22 +369,60 @@ extension MenuBarItemManager {
         }
 
         do {
+            guard isLayoutSnapshotReady(hidden: hiddenControlItem, alwaysHidden: alwaysHiddenControlItem, geometryOnly: true) else { return }
             if let alwaysHiddenControlItem {
                 try await enforceControlItemOrder(
                     hiddenControlItem: hiddenControlItem,
                     alwaysHiddenControlItem: alwaysHiddenControlItem
                 )
             }
+            // 调整分隔符会移动多个窗口，必须重新读取，不能继续使用调整前的坐标。
+            var items: [MenuBarItem] = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
+            guard let hiddenIndex: Int = items.firstIndex(matching: .hiddenControlItem) else {
+                layoutReadiness = MenuBarLayoutReadiness()
+                return
+            }
+            let hiddenControlItem: MenuBarItem = items.remove(at: hiddenIndex)
+            let alwaysHiddenControlItem: MenuBarItem? = items.firstIndex(matching: .alwaysHiddenControlItem).map { items.remove(at: $0) }
+            guard isLayoutSnapshotReady(hidden: hiddenControlItem, alwaysHidden: alwaysHiddenControlItem) else { return }
             uncheckedCacheItems(
                 hiddenControlItem: hiddenControlItem,
                 alwaysHiddenControlItem: alwaysHiddenControlItem,
                 otherItems: items
             )
+            if !isLayoutReady {
+                isLayoutReady = true
+                layoutInitializationTimedOut = false
+                Logger.itemManager.info("Initial menu bar layout is ready (visible: \(itemCache.managedItems(for: .visible).count), hidden: \(itemCache.managedItems(for: .hidden).count), alwaysHidden: \(itemCache.managedItems(for: .alwaysHidden).count))")
+            }
         } catch {
             Logger.itemManager.error("Error enforcing control item order: \(error)")
+            layoutReadiness = MenuBarLayoutReadiness()
             Logger.itemManager.debug("Clearing menu bar item cache")
             itemCache.clear()
         }
+    }
+
+    /// 按当前设置核对分隔符状态，首次缓存额外等待位置稳定。
+    private func isLayoutSnapshotReady(hidden: MenuBarItem, alwaysHidden: MenuBarItem?, geometryOnly: Bool = false) -> Bool {
+        guard let appState else { return false }
+        let manager: MenuBarManager = appState.menuBarManager
+        let hiddenDivider: MenuBarLayoutReadiness.Divider = MenuBarLayoutReadiness.Divider(frame: hidden.frame,
+            isExpanded: manager.section(withName: .hidden)?.controlItem.state == .hideItems)
+        let alwaysDivider: MenuBarLayoutReadiness.Divider? = alwaysHidden.map {
+            MenuBarLayoutReadiness.Divider(frame: $0.frame,
+                isExpanded: manager.section(withName: .alwaysHidden)?.controlItem.state == .hideItems)
+        }
+        let required: Bool = appState.settingsManager.advancedSettingsManager.enableAlwaysHiddenSection
+        let minimumWidth: CGFloat = NSScreen.main?.frame.width ?? 1_000
+        if isLayoutReady || geometryOnly {
+            let valid: Bool = MenuBarLayoutReadiness.isValid(hidden: hiddenDivider, alwaysHidden: alwaysDivider,
+                requiresAlwaysHidden: required, minimumExpandedWidth: minimumWidth, requiresCorrectOrder: !geometryOnly)
+            if !valid { layoutReadiness = MenuBarLayoutReadiness() }
+            return valid
+        }
+        return layoutReadiness.observe(hidden: hiddenDivider, alwaysHidden: alwaysDivider,
+            requiresAlwaysHidden: required, minimumExpandedWidth: minimumWidth, now: ProcessInfo.processInfo.systemUptime)
     }
 }
 
