@@ -29,6 +29,7 @@ private enum MenuBarCompatibilityTests {
         try testAverageColor()
         try testImageCache()
         try testLayoutReadiness()
+        try testMovePosition()
         print("All menu bar compatibility regression cases passed.")
     }
 
@@ -40,6 +41,58 @@ private enum MenuBarCompatibilityTests {
             ])
         }
         print("PASS: \(name)")
+    }
+
+    /// 覆盖系统间隙、舍入误差、屏幕外隐藏区和错误落点，防止只按坐标变化误报成功。
+    private static func testMovePosition() throws {
+        typealias Window = MenuBarItemPosition.Window
+        let item: Window = Window(id: 1, frame: CGRect(x: -4_355, y: 0, width: 18, height: 33))
+        let touching: Window = Window(id: 2, frame: CGRect(x: -4_337, y: 0, width: 16, height: 33))
+        let spaced: Window = Window(id: 2, frame: touching.frame.offsetBy(dx: 12, dy: 0))
+        let rounded: Window = Window(id: 2, frame: touching.frame.offsetBy(dx: -0.25, dy: 0))
+        let overlapping: Window = Window(id: 2, frame: touching.frame.offsetBy(dx: -3, dy: 0))
+        let otherIcon: Window = Window(id: 3, frame: CGRect(x: -4_336, y: 0, width: 8, height: 33))
+        let zeroDivider: Window = Window(id: 4, frame: CGRect(x: -4_332, y: 0, width: 0, height: 33))
+        let expandedDivider: Window = Window(id: 4, frame: CGRect(x: -4_337, y: 0, width: 5_000, height: 33))
+        let acrossDivider: Window = Window(id: 2, frame: CGRect(x: 670, y: 0, width: 18, height: 33))
+        let otherRow: Window = Window(id: 2, frame: spaced.frame.offsetBy(dx: 0, dy: 1_000))
+        let missingFrame: Window = Window(id: 2, frame: .null)
+        let invalidFrame: Window = Window(id: 2, frame: CGRect(x: CGFloat.nan, y: 0, width: 16, height: 33))
+        let cases: [(String, [Window], Bool)] = [
+            ("offscreen adjacent icons confirm successfully", [item, touching], true),
+            ("system spacing does not cause timeout", [item, spaced], true),
+            ("subpixel rounding is tolerated", [item, rounded], true),
+            ("overlapping icons do not confirm", [item, overlapping], false),
+            ("intervening icon rejects wrong insertion", [item, spaced, otherIcon], false),
+            ("collapsed divider still blocks cross-section success", [item, spaced, zeroDivider], false),
+            ("expanded divider blocks cross-section success", [item, acrossDivider, expandedDivider], false),
+            ("target on another menu bar row is rejected", [item, otherRow], false),
+            ("other row does not obstruct adjacency", [item, spaced, Window(id: 3, frame: otherIcon.frame.offsetBy(dx: 0, dy: 1_000))], true),
+            ("missing target cannot confirm", [item], false),
+            ("missing source cannot confirm", [spaced], false),
+            ("null frame cannot confirm", [item, missingFrame], false),
+            ("non-finite frame cannot confirm", [item, invalidFrame], false),
+        ]
+        for (name, windows, expected) in cases {
+            try expect(MenuBarItemPosition.isCorrect(itemID: 1, targetID: 2, side: .left, windows: windows) == expected,
+                       "left: \(name)")
+            // 交换源和目标后，同一批坐标必须给出对称的右侧判断。
+            if windows.contains(where: { $0.id == 2 }) {
+                try expect(MenuBarItemPosition.isCorrect(itemID: 2, targetID: 1, side: .right, windows: windows) == expected,
+                           "right: \(name)")
+            }
+        }
+        try expect(!MenuBarItemPosition.isCorrect(itemID: 1, targetID: 2, side: .right, windows: [item, spaced]),
+                   "wrong side is not successful movement")
+        try expect(!MenuBarItemPosition.isCorrect(itemID: 1, targetID: 1, side: .left, windows: [item]),
+                   "same source and target cannot confirm")
+        try expect(MenuBarItemPosition.isCorrect(itemID: 1, targetID: 4, side: .left, windows: [item, zeroDivider]),
+                   "invisible separator is a valid destination")
+        try expect(MenuBarItemPosition.isCorrect(itemID: 4, targetID: 2, side: .left, windows: [zeroDivider, spaced]),
+                   "invisible separator remains movable")
+        try expect(MenuBarItemPosition.isCorrect(itemID: 4, targetID: 5, side: .left,
+                   windows: [zeroDivider, Window(id: 5, frame: zeroDivider.frame)]),
+                   "coincident invisible separators retain touching-edge behavior")
     }
 
     /// 模拟分隔符从未创建、展开、移动到稳定的启动过程，防止过早发布错误分区。

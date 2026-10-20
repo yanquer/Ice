@@ -690,28 +690,41 @@ extension MenuBarItemManager {
         }
     }
 
-    /// Returns a Boolean value that indicates whether the given item is in the
-    /// correct position for the given destination.
-    ///
-    /// - Parameters:
-    ///   - item: The item to check the position of.
-    ///   - destination: The destination to compare the item's position against.
+    /// 按最新窗口的左右邻接关系确认到位，不要求系统窗口边缘完全贴合。
     private func itemHasCorrectPosition(item: MenuBarItem, for destination: MoveDestination) throws -> Bool {
-        guard let currentFrame = getCurrentFrame(for: item) else {
+        let targetItem: MenuBarItem = getTargetItem(for: destination)
+        guard getCurrentFrame(for: item) != nil else {
             throw EventError(code: .invalidItem, item: item)
         }
-        switch destination {
-        case .leftOfItem(let targetItem):
-            guard let currentTargetFrame = getCurrentFrame(for: targetItem) else {
-                throw EventError(code: .invalidItem, item: targetItem)
-            }
-            return currentFrame.maxX == currentTargetFrame.minX
-        case .rightOfItem(let targetItem):
-            guard let currentTargetFrame = getCurrentFrame(for: targetItem) else {
-                throw EventError(code: .invalidItem, item: targetItem)
-            }
-            return currentFrame.minX == currentTargetFrame.maxX
+        guard getCurrentFrame(for: targetItem) != nil else {
+            throw EventError(code: .invalidItem, item: targetItem)
         }
+        let windows: [MenuBarItemPosition.Window] = Bridging.getWindowList(option: [.menuBarItems, .activeSpace])
+            .compactMap { windowID in
+                Bridging.getWindowFrame(for: windowID).map { MenuBarItemPosition.Window(id: windowID, frame: $0) }
+            }
+        let side: MenuBarItemPosition.Side = switch destination {
+        case .leftOfItem: .left
+        case .rightOfItem: .right
+        }
+        return MenuBarItemPosition.isCorrect(itemID: item.windowID, targetID: targetItem.windowID, side: side, windows: windows)
+    }
+
+    /// 有限等待系统完成排列，轮询之间让出执行权，超时记录真实落点和目标以便诊断。
+    private func waitForCorrectPosition(item: MenuBarItem, to destination: MoveDestination, timeout: Duration) async throws {
+        let deadline: ContinuousClock.Instant = ContinuousClock.now.advanced(by: timeout)
+        repeat {
+            try Task.checkCancellation()
+            if try itemHasCorrectPosition(item: item, for: destination) { return }
+            try await Task.sleep(for: .milliseconds(20))
+        } while ContinuousClock.now < deadline
+        // 截止时间附近再取一次最新快照，避免最后一轮系统更新被漏判。
+        if try itemHasCorrectPosition(item: item, for: destination) { return }
+        let targetItem: MenuBarItem = getTargetItem(for: destination)
+        let itemFrame: String = getCurrentFrame(for: item).map(NSStringFromRect) ?? "unavailable"
+        let targetFrame: String = getCurrentFrame(for: targetItem).map(NSStringFromRect) ?? "unavailable"
+        Logger.itemManager.error("Move position confirmation timed out: \(item.logString) frame=\(itemFrame), destination=\(destination.logString), targetFrame=\(targetFrame)")
+        throw EventError(code: .otherTimeout, item: item)
     }
 
     /// Returns a Boolean value that indicates whether the given events have the
@@ -1128,12 +1141,10 @@ extension MenuBarItemManager {
         }
     }
 
-    /// Moves a menu bar item to the given destination.
-    ///
-    /// - Parameters:
-    ///   - item: A menu bar item to move.
-    ///   - destination: A destination to move the menu bar item.
-    func move(item: MenuBarItem, to destination: MoveDestination) async throws {
+    /// 移动项目并确认目标邻接关系；每次尝试使用同一套成功判定和有限等待。
+    func move(item: MenuBarItem, to destination: MoveDestination, timeout: Duration = .seconds(1)) async throws {
+        itemMoveCount += 1
+        defer { itemMoveCount -= 1 }
         if try itemHasCorrectPosition(item: item, for: destination) {
             Logger.itemManager.debug("\(item.logString) is already in the correct position")
             return
@@ -1156,7 +1167,7 @@ extension MenuBarItemManager {
         guard let cursorLocation = MouseCursor.locationCoreGraphics else {
             throw EventError(code: .invalidCursorLocation, item: item)
         }
-        guard let initialFrame = getCurrentFrame(for: item) else {
+        guard getCurrentFrame(for: item) != nil else {
             throw EventError(code: .invalidItem, item: item)
         }
 
@@ -1177,16 +1188,18 @@ extension MenuBarItemManager {
         for n in 1...5 {
             do {
                 try await moveItemWithoutRestoringMouseLocation(item, to: destination)
-                guard let newFrame = getCurrentFrame(for: item) else {
-                    throw EventError(code: .invalidItem, item: item)
+                try await waitForCorrectPosition(item: item, to: destination, timeout: timeout)
+                Logger.itemManager.info("Successfully moved \(item.logString) to \(destination.logString)")
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // 事件或帧回执可能超时，但系统已完成排列；重发前先核对实际位置。
+                if try itemHasCorrectPosition(item: item, for: destination) {
+                    Logger.itemManager.info("Confirmed move after event error for \(item.logString) to \(destination.logString)")
+                    return
                 }
-                if newFrame != initialFrame {
-                    Logger.itemManager.info("Successfully moved \(item.logString)")
-                    break
-                } else {
-                    throw EventError(code: .couldNotComplete, item: item)
-                }
-            } catch where n < 5 {
+                guard n < 5 else { throw error }
                 Logger.itemManager.warning("Attempt \(n) to move \(item.logString) failed (error: \(error))")
                 try await wakeUpItem(item)
                 Logger.itemManager.info("Retrying move of \(item.logString)")
@@ -1195,32 +1208,9 @@ extension MenuBarItemManager {
         }
     }
 
-    /// Moves a menu bar item to the given destination and waits until the move
-    /// completes before returning.
-    /// 
-    /// - Parameters:
-    ///   - item: A menu bar item to move.
-    ///   - destination: A destination to move the menu bar item.
-    ///   - timeout: Amount of time to wait before throwing an error.
+    /// 复用已包含到位确认的移动流程，保持布局拖动和临时显示入口的调用方式。
     func slowMove(item: MenuBarItem, to destination: MoveDestination, timeout: Duration = .seconds(1)) async throws {
-        itemMoveCount += 1
-        defer {
-            itemMoveCount -= 1
-        }
-        try await move(item: item, to: destination)
-        let waitTask = Task(timeout: timeout) {
-            while true {
-                try Task.checkCancellation()
-                if try await self.itemHasCorrectPosition(item: item, for: destination) {
-                    return
-                }
-            }
-        }
-        do {
-            try await waitTask.value
-        } catch is TaskTimeoutError {
-            throw EventError(code: .otherTimeout, item: item)
-        }
+        try await move(item: item, to: destination, timeout: timeout)
     }
 }
 
