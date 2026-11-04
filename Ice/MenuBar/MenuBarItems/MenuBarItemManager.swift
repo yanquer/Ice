@@ -1006,7 +1006,7 @@ extension MenuBarItemManager {
         source.localEventsSuppressionInterval = suppressionInterval
     }
 
-    /// Tries to wake up the given item if it is not responding to events.
+    /// 尝试唤醒无响应的项目，并在唤醒事件结束时恢复光标。
     private func wakeUpItem(_ item: MenuBarItem) async throws {
         Logger.itemManager.debug("Attempting to wake up \(item.logString)")
 
@@ -1036,6 +1036,17 @@ extension MenuBarItemManager {
             throw EventError(code: .eventCreationFailure, item: item)
         }
 
+        guard let cursorLocation: CGPoint = MouseCursor.locationCoreGraphics else {
+            throw EventError(code: .invalidCursorLocation, item: item)
+        }
+        let cursorHideStart: ContinuousClock.Instant = .now
+        MouseCursor.hide()
+        defer {
+            MouseCursor.warp(to: cursorLocation)
+            MouseCursor.show()
+            Logger.itemManager.info("Cursor restore requested after waking \(item.logString) (hide scope duration: \(cursorHideStart.duration(to: .now)))")
+        }
+
         try await scrombleEvent(
             mouseDownEvent,
             from: .pid(item.ownerPID),
@@ -1050,13 +1061,12 @@ extension MenuBarItemManager {
         )
     }
 
-    /// Moves a menu bar item to the given destination, without restoring the mouse
-    /// pointer to its initial location.
+    /// 发送一次模拟拖动，并在返回或失败时恢复光标；不包含位置确认和重试等待。
     ///
     /// - Parameters:
     ///   - item: A menu bar item to move.
     ///   - destination: A destination to move the menu bar item.
-    private func moveItemWithoutRestoringMouseLocation(_ item: MenuBarItem, to destination: MoveDestination) async throws {
+    private func moveItemOnce(_ item: MenuBarItem, to destination: MoveDestination) async throws {
         itemMoveCount += 1
         defer {
             itemMoveCount -= 1
@@ -1112,6 +1122,17 @@ extension MenuBarItemManager {
 
         lastItemMoveStartDate = .now
 
+        guard let cursorLocation: CGPoint = MouseCursor.locationCoreGraphics else {
+            throw EventError(code: .invalidCursorLocation, item: item)
+        }
+        let cursorHideStart: ContinuousClock.Instant = .now
+        MouseCursor.hide()
+        defer {
+            MouseCursor.warp(to: cursorLocation)
+            MouseCursor.show()
+            Logger.itemManager.info("Cursor restore requested after moving \(item.logString) (hide scope duration: \(cursorHideStart.duration(to: .now)))")
+        }
+
         do {
             try await scrombleEvent(
                 mouseDownEvent,
@@ -1135,7 +1156,7 @@ extension MenuBarItemManager {
                     item: item
                 )
             } catch {
-                Logger.itemManager.error("Failed to post fallback event for moving \(item.logString)")
+                Logger.itemManager.error("Failed to post fallback event for moving \(item.logString) (error: \(error))")
             }
             throw error
         }
@@ -1164,9 +1185,6 @@ extension MenuBarItemManager {
         guard let appState else {
             throw EventError(code: .invalidAppState, item: item)
         }
-        guard let cursorLocation = MouseCursor.locationCoreGraphics else {
-            throw EventError(code: .invalidCursorLocation, item: item)
-        }
         guard getCurrentFrame(for: item) != nil else {
             throw EventError(code: .invalidItem, item: item)
         }
@@ -1176,18 +1194,12 @@ extension MenuBarItemManager {
             appState.eventManager.startAll()
         }
 
-        MouseCursor.hide()
-
-        defer {
-            MouseCursor.warp(to: cursorLocation)
-            MouseCursor.show()
-        }
-
         // Item movement can occasionally fail. Retry up to a total of 5 attempts,
         // throwing the last attempt's error if it fails.
         for n in 1...5 {
             do {
-                try await moveItemWithoutRestoringMouseLocation(item, to: destination)
+                // 每次模拟拖动结束即恢复光标，确认位置和重试期间保持可见。
+                try await moveItemOnce(item, to: destination)
                 try await waitForCorrectPosition(item: item, to: destination, timeout: timeout)
                 Logger.itemManager.info("Successfully moved \(item.logString) to \(destination.logString)")
                 return
@@ -1477,12 +1489,6 @@ extension MenuBarItemManager {
         var failedContexts = [TempShownItemContext]()
 
         let items = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
-
-        MouseCursor.hide()
-
-        defer {
-            MouseCursor.show()
-        }
 
         while let context = tempShownItemContexts.popLast() {
             guard let item = items.first(where: { $0.info == context.info }) else {
